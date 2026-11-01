@@ -1,0 +1,9 @@
+{
+  "uuid": "magnixify@quackhack-mcblindy.com",
+  "name": "Magnixify",
+  "description": "Magnixify - See the bigger picture! A btter magnifier.",
+  "shell-version": [
+    "50"
+  ],
+  "url": "https://github.com/quackhack-mcblindy/magnixify-gnome-shell-extension"
+}
