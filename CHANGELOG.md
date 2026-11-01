@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+
+## [1.0.1] - 2026-11-01
+
+### Added
+
 - **Smooth zoom** from `1.0x` to `8.0x` with animated transitions.
 - **Follow mouse** – the magnifier tracks the pointer as it moves.
 - **Follow focus** – tracks the text or caret via AT-SPI2.
@@ -22,7 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Removed
-
 
 ## [0.1.0] - 2026-11-01
 
