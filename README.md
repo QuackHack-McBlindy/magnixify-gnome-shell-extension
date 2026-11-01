@@ -4,7 +4,7 @@
 
 <br>
 
-
+## **Improved Accessibility Magnify Your Monitor**
 
 This project aims to fill the gaps when it comes to accessibility on Linux systems for visually impaired people.<br>
 At first glance it looks like the GNOME magnifier has everything a user would require.<br>
@@ -28,7 +28,7 @@ Disabling the built-in magnifier and enabling **magnixify** allows blind people 
 - **Preferences** – toggle follow modes, auto-start and other options from the top panel menu.
 
 
-![Screenshot](Screenshots/magnixify.png)
+<img src="Screenshots/magnixify.png" alt="Screenshot" width="50%">
 
 <br>
 
@@ -46,7 +46,7 @@ bash install.sh
 
 
 <details><summary><strong>
-**❄️ Installing Using Flakes (NixOS)**
+❄️ Installing Using Flakes (NixOS)
 </strong></summary>
 
 
@@ -55,18 +55,8 @@ bash install.sh
 ```nix
   inputs = {
     nixpkgs.url   = "github:NixOS/nixpkgs/nixos-unstable";
-    magnixify.url = "github:quackhack-mcblindy/magnixify";
+    magnixify.url = "github:quackhack-mcblindy/magnixify-gnome-shell-extension";
   };
-```
-
-
-#### **Import the magnixify module into your configuration:**
-
-
-```nix
-{
-  imports = [ magnixify.nixosModules.magnixify ];
-}
 ```
 
 <br>
@@ -74,11 +64,10 @@ The flake provides the extension as a package.<br>
 
 ```nix
 {
-  environment.systemPackages = [ magnixify.packages.${pkgs.system}.default ];
+  environment.systemPackages = [ inputs.magnixify.packages.${pkgs.system}.default ];
 }
 ```
 
-<br>
 To use magnixify declaratively:<br>
 
 
@@ -149,10 +138,10 @@ The extension exports the following interface while it is enabled:<br>
 **Object path:** `/org/gnome/Shell/Extensions/Magnixify`<br>
 **Interface:** `org.gnome.Shell.Extensions.Magnixify`<br>
 
-<br>
 This allows the user to control the extension through `gdbus` and therefore bind keyboard shortcuts to control the magnifier.<br><br>
 
-Open the GNOME **Settings** **->** press **Keyboard** *(left side)* **->** press **View and Customize Shortcuts** **->** **Custom Shortcuts** **->** and click **+ Add Shortcut**.<br>
+Open the GNOME **Settings:**<br>
+**->** press **Keyboard** *(left side)* **->** press **View and Customize Shortcuts** **->** **Custom Shortcuts** **->** and click **+ Add Shortcut**.<br>
 
 **Toggle Zoom (on/off)**
 
