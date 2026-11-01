@@ -12,7 +12,9 @@
         let
           pkgs = import nixpkgs { inherit system; };
         in {
-          default = pkgs.runCommand "magnixify-${version}" { } ''
+          default = pkgs.runCommand "magnixify-${version}" {
+            inherit version;
+          } ''
             mkdir -p "$out/share/gnome-shell/extensions/magnixify@quackhack-mcblindy.com"
             cp -r ${builtins.path {
               path = ./.;
