@@ -4,14 +4,14 @@
 
 <br>
 
-## **Improved Accessibility Magnify Your Monitor**
+## **Improved Accessibility: Magnify Your Monitor**
 
 This project aims to fill the gaps when it comes to accessibility on Linux systems for visually impaired people.<br>
 At first glance it looks like the GNOME magnifier has everything a user would require.<br>
-But users who has actually used it has found that it's just good enough to keep you from pulling your hair out.<br>
+But users who have actually used it have found that it's just good enough to keep you from pulling your hair out.<br>
 Instead of the magnifier following the content, it does the opposite and moves the magnifier AWAY from the text that users are typing.<br>
 
-Disabling the built-in magnifier and enabling **magnixify** allows blind people to have a **much more** pleasent Linux desktop experience.<br>
+Disabling the built-in magnifier and enabling **magnixify** allows blind people to have a **much more** pleasant Linux desktop experience.<br>
 
 **🧑‍🦯 By blind people - for blind people!** <br>
 
@@ -25,7 +25,7 @@ Disabling the built-in magnifier and enabling **magnixify** allows blind people 
 - **Peek mode** – temporarily drops back to `1.0x` while `Super` or `Alt` is held, or while the overview is open.
 - **Cursor scaling** – the mouse cursor grows with the zoom level.
 - **D-Bus interface** – control zoom externally or with keybindings.
-- **Preferences** – toggle follow modes, auto-start and other options from the top panel menu.
+- **Preferences** – toggle follow modes, auto-start, and other options from the top panel menu.
 
 
 <img src="Screenshots/magnixify.png" alt="Screenshot" width="50%">
@@ -125,7 +125,7 @@ To use magnixify declaratively:<br>
 
 <br>
 
-**Rebuild your system and finally restart your host.**
+**Rebuild your system and restart your host.**
 
 </details>
 <br>
@@ -171,14 +171,14 @@ gdbus call --session --dest "org.gnome.Shell.Extensions.Magnixify" --object-path
 ## **Notes / Debugging**
 
 Each application handles caret differently.<br>
-Some of them may require special configuration for track focus to work.<br>
+Some of them may require special configuration for focus tracking to work.<br>
 Here I will try to list some of them. Always check if it already works before making any changes.<br><br>
 
 <details><summary><strong>
 Firefox
 </strong></summary>
 
-Type `about:config` in the address bar and hit enter.<br>
+Type `about:config` in the address bar and hit Enter.<br>
 
 ```
 "accessibility.browsewithcaret" = true;
