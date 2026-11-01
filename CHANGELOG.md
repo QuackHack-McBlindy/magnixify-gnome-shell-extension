@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Smooth zoom** from `1.0x` to `8.0x` with animated transitions.
+- **Follow mouse** – the magnifier tracks the pointer as it moves.
+- **Follow focus** – tracks the text or caret via AT-SPI2.
+- **Peek mode** – temporarily drops back to `1.0x` while `Super` or `Alt` is held, or while the overview is open.
+- **Cursor scaling** – the mouse cursor grows with the zoom level.
+- **D-Bus interface** – control zoom externally or with keybindings.
+- **Preferences** – toggle follow modes, auto-start, and other options from the top panel menu.
+
 ### Changed
 
 ### Fixed
