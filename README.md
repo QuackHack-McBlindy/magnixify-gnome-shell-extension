@@ -1,0 +1,1 @@
+# magnixify-gnome-shell-extension
