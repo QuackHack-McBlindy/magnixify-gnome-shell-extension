@@ -4,7 +4,7 @@
 
   outputs = { self, nixpkgs }:
     let
-      version = "1.0.1";
+      version = "1.0.2";
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
     in {

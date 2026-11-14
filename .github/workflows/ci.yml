@@ -15,7 +15,7 @@ name: CI
 #  ▼
 # main
 #  │
-#  │ merge dev → main
+#  │ merge dev --> main
 #  ▼
 # BUILD
 #  │
@@ -32,7 +32,7 @@ name: CI
 #  │
 #  ├── CHANGELOG [Unreleased]
 #  │        │
-#  │        └── promote → [0.3.1]
+#  │        └── promote --> [0.3.1]
 #  │
 #  ├── commit changelog
 #  │
@@ -41,7 +41,7 @@ name: CI
 #  ├── GitHub Release v0.3.1
 #  │
 #  ▼
-# sync dev ← main
+# sync dev <-- MAIN
 
 
 on:
