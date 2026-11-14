@@ -23,7 +23,6 @@ Disabling the built-in magnifier and enabling **magnixify** allows blind people 
 - **Follow mouse** – the magnifier tracks the pointer as it moves.
 - **Follow focus** – tracks the text or caret via AT-SPI2.
 - **Peek mode** – temporarily drops back to `1.0x` while `Super` or `Alt` is held, or while the overview is open.
-- **Cursor scaling** – the mouse cursor grows with the zoom level.
 - **D-Bus interface** – control zoom externally or with keybindings.
 - **Preferences** – toggle follow modes, auto-start, and other options from the top panel menu.
 
@@ -169,6 +168,19 @@ gdbus call --session --dest "org.gnome.Shell.Extensions.Magnixify" --object-path
 
 
 ## **Notes / Debugging**
+
+If it's not following properly, the issue is most likely that AT‑SPI is off, check with:<br>
+
+```bash
+gsettings get org.gnome.desktop.interface toolkit-accessibility
+``` 
+
+
+**Turn it on with:** <br>
+
+```bash
+gsettings set org.gnome.desktop.interface toolkit-accessibility true
+```
 
 Each application handles caret differently.<br>
 Some of them may require special configuration for focus tracking to work.<br>

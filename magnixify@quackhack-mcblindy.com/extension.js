@@ -34,6 +34,12 @@ const DBUS_IFACE_XML = `
     <method name="GetZoom">
       <arg type="d" direction="out"/>
     </method>
+    <method name="SetBrightness">
+      <arg type="d" direction="in"/>
+    </method>
+    <method name="GetBrightness">
+      <arg type="d" direction="out"/>
+    </method>
   </interface>
 </node>`;
 
@@ -45,10 +51,12 @@ const POINTER_STOP_DELAY_MS = 450;
 const CARET_POLL_MS = 40;
 const FOLLOW_WINDOW_MS = 250;
 const CARET_EPSILON = 2;
-
 const PEEK_WATCH_MS = 30;
-
 const POST_MODAL_GRACE_MS = 1500;
+const BRIGHTNESS_MIN = -0.9;
+const BRIGHTNESS_MAX = 0.2;
+const CURSOR_SIZE_CAP = 512;
+const CURSOR_ZOOM_EXPONENT = 0.4;
 
 function plainLabel(text, style = '') {
     const lbl = new St.Label({ text: String(text), style });
@@ -76,78 +84,93 @@ class MagnixifyIndicator extends PanelMenu.Button {
     _init() {
         super._init(0.0, _('magnixify'));
 
-        this._zoomLevel       = 2.5;
-        this._zoomDurationMs  = 150;
-        this._followSmoothing = 0.16;
+        this._setDefaults();
 
+        try {
+            this._loadPrefs();
+            this._healCursorIfStuck();
+
+            this._panelIconBox = new St.Widget({ layout_manager: new Clutter.BinLayout() });
+            this._panelIconBox.add_child(this._buildPanelIcon());
+            this.add_child(this._panelIconBox);
+
+            this._initAtspi();
+            this._initShellFocusTracking();
+            this._initDbus();
+            this._buildPopup();
+        } catch (e) {
+            try { this.cleanup(); } catch (_) { }
+            throw e;
+        }
+    }
+
+    _setDefaults() {
+        this._zoomLevel = 2.5;
+        this._zoomDurationMs = 150;
+        this._followSmoothing = 0.16;
+        this._brightnessLevel = 0.0;
         this._followMouseEnabled = true;
         this._followFocusEnabled = true;
-
         this._peekOnOverview = false;
-
         this._autoStart = true;
-        this._loadPrefs();
 
-        this._state          = 'IDLE';
-        this._container      = null;
-        this._zoomActor      = null;
-        this._clone          = null;
-        this._mon            = null;
-        this._pivotX         = 0;
-        this._pivotY         = 0;
-        this._followTimer    = 0;
+        this._state = 'IDLE';
+        this._container = null;
+        this._zoomActor = null;
+        this._clone = null;
+        this._mon = null;
+        this._pivotX = 0;
+        this._pivotY = 0;
+        this._followTimer = 0;
         this._peekWatchTimer = 0;
-        this._peeking        = false;
-        this._lastModalTime  = 0;
+        this._peeking = false;
+        this._lastModalTime = 0;
 
-        this._cursorSizeBase   = 24;
-        this._cursorSizeMax    = 124;
-        this._cursorSavedSize  = 0;
-        this._cursorSettings   = null;
+        this._cursorSizeBase = 24;
+        this._cursorBaseline = 0;
+        this._cursorSavedSize = 0;
+        this._cursorLastApplied = 0;
+        this._cursorWasOverridden = false;
+        this._cursorSettings = null;
+        this._prefsMode = 'fresh';
 
-        this._lastPx              = -1;
-        this._lastPy              = -1;
+        this._lastPx = -1;
+        this._lastPy = -1;
         this._lastPointerMoveTime = 0;
         this._pointerStationarySince = 0;
 
-        this._focusX             = -1;
-        this._focusY             = -1;
+        this._focusX = -1;
+        this._focusY = -1;
         this._lastFocusEventTime = 0;
-        this._atspiListener      = null;
-        this._caretPollTimer     = 0;
-        this._activeTextObject   = null;
+        this._atspiListener = null;
+        this._caretPollTimer = 0;
+        this._activeTextObject = null;
 
         this._superHeld = false;
-        this._altHeld   = false;
+        this._altHeld = false;
 
         this._focusWindowSignalId = 0;
-        this._stageFocusSignalId  = 0;
-        this._capturedEventId     = 0;
-        this._overviewShowingId   = 0;
-        this._overviewHiddenId    = 0;
+        this._stageFocusSignalId = 0;
+        this._capturedEventId = 0;
+        this._overviewShowingId = 0;
+        this._overviewHiddenId = 0;
 
-        this._dbus        = null;
-        this._dbusNameId  = 0;
+        this._dbus = null;
+        this._dbusNameId = 0;
 
         this._syncingSlider = false;
-        this._panelIconBox  = null;
-        this._zoomRow       = null;
-        this._mouseRow      = null;
-        this._focusRow      = null;
-        this._autoStartRow  = null;
+        this._syncingBrightnessSlider = false;
+        this._panelIconBox = null;
+        this._zoomRow = null;
+        this._brightnessRow = null;
+        this._mouseRow = null;
+        this._focusRow = null;
+        this._autoStartRow = null;
         this._overviewPeekRow = null;
-        this._statusLabel   = null;
-        this._actionBtn     = null;
+        this._statusLabel = null;
+        this._actionBtn = null;
 
-        this._panelIconBox = new St.Widget({ layout_manager: new Clutter.BinLayout() });
-        this._panelIconBox.add_child(this._buildPanelIcon());
-        this.add_child(this._panelIconBox);
-
-        this._initAtspi();
-        this._checkAccessibilitySetting();
-        this._initShellFocusTracking();
-        this._initDbus();
-        this._buildPopup();
+        this._brightnessEffect = null;
     }
 
     _prefsPath() {
@@ -159,13 +182,30 @@ class MagnixifyIndicator extends PanelMenu.Button {
     _loadPrefs() {
         try {
             const [ok, data] = GLib.file_get_contents(this._prefsPath());
-            if (!ok) return;
+            if (!ok) {
+                this._prefsMode = 'fresh';
+                return;
+            }
             const parsed = JSON.parse(new TextDecoder('utf-8').decode(data));
             if (typeof parsed.autoStart === 'boolean')
                 this._autoStart = parsed.autoStart;
             if (typeof parsed.peekOnOverview === 'boolean')
                 this._peekOnOverview = parsed.peekOnOverview;
-        } catch (_) { }
+            if (typeof parsed.brightness === 'number')
+                this._brightnessLevel =
+                    Math.max(BRIGHTNESS_MIN, Math.min(BRIGHTNESS_MAX, parsed.brightness));
+            if (typeof parsed.cursorBaseline === 'number' &&
+                parsed.cursorBaseline > 0 && parsed.cursorBaseline <= 256) {
+                this._cursorBaseline = parsed.cursorBaseline;
+                if (typeof parsed.cursorWasOverridden === 'boolean')
+                    this._cursorWasOverridden = parsed.cursorWasOverridden;
+                this._prefsMode = 'normal';
+            } else {
+                this._prefsMode = 'upgrade';
+            }
+        } catch (_) {
+            this._prefsMode = 'fresh';
+        }
     }
 
     _savePrefs() {
@@ -175,25 +215,15 @@ class MagnixifyIndicator extends PanelMenu.Button {
             GLib.file_set_contents(path, JSON.stringify({
                 autoStart: this._autoStart,
                 peekOnOverview: this._peekOnOverview,
+                brightness: this._brightnessLevel,
+                cursorBaseline: this._cursorBaseline,
+                cursorWasOverridden: this._cursorWasOverridden,
             }));
         } catch (e) {
             log('magnixify: failed to save prefs: ' + e.message);
         }
     }
 
-    _checkAccessibilitySetting() {
-        try {
-            const settings = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
-            if (!settings.get_boolean('toolkit-accessibility')) {
-                settings.set_boolean('toolkit-accessibility', true);
-                log('magnixify: enabled toolkit-accessibility');
-            }
-        } catch (e) {
-            log('magnixify: could not check toolkit-accessibility: ' + e.message);
-        }
-    }
-
-    
     _cursorSettingsInstance() {
         if (!this._cursorSettings) {
             try {
@@ -207,50 +237,109 @@ class MagnixifyIndicator extends PanelMenu.Button {
         }
         return this._cursorSettings;
     }
-    
-    _cursorSizeForZoom(zoom) {
-        const span  = this._cursorSizeMax - this._cursorSizeBase;
-        const zspan = ZOOM_MAX - ZOOM_MIN;
-        const raw   = this._cursorSizeBase + (zoom - ZOOM_MIN) * span / zspan;
 
-        const NICE = [16, 24, 32, 48, 64, 96, 124, 128];
-        let best = NICE[0];
-        let bestDelta = Math.abs(NICE[0] - raw);
-        for (const n of NICE) {
-            const d = Math.abs(n - raw);
-            if (d < bestDelta) { best = n; bestDelta = d; }
+    _healCursorIfStuck() {
+        const s = this._cursorSettingsInstance();
+        if (!s) {
+            if (!this._cursorBaseline)
+                this._cursorBaseline = this._cursorSizeBase;
+            return;
         }
-        return Math.max(this._cursorSizeBase, best);
+
+        if (this._prefsMode === 'fresh') {
+            let current = this._cursorSizeBase;
+            try {
+                const v = s.get_int('cursor-size');
+                if (v > 0 && v <= 256) current = v;
+            } catch (_) {}
+            this._cursorBaseline = current;
+            this._cursorWasOverridden = false;
+            this._savePrefs();
+            return;
+        }
+
+        if (this._prefsMode === 'upgrade') {
+            this._cursorBaseline = this._cursorSizeBase;
+            try { s.set_int('cursor-size', this._cursorBaseline); } catch (_) {}
+            this._cursorWasOverridden = false;
+            this._savePrefs();
+            return;
+        }
+
+        if (this._cursorWasOverridden) {
+            try { s.set_int('cursor-size', this._cursorBaseline); } catch (_) {}
+            this._cursorWasOverridden = false;
+            this._savePrefs();
+        }
     }
-    
+
+    _cursorSizeForZoom(zoom) {
+        const saved = this._cursorBaseline || this._cursorSizeBase;
+        if (!Number.isFinite(zoom) || zoom <= ZOOM_MIN)
+            return saved;
+        const clamped = Math.min(zoom, ZOOM_MAX);
+        const target = Math.round(saved * Math.pow(clamped, CURSOR_ZOOM_EXPONENT));
+        if (!Number.isFinite(target))
+            return saved;
+        return Math.max(saved, Math.min(CURSOR_SIZE_CAP, target));
+    }
+
     _applyCursorSize(zoom) {
         const s = this._cursorSettingsInstance();
         if (!s) return;
         const target = this._cursorSizeForZoom(zoom);
-        if (s.get_int('cursor-size') === target) return;
-        try { s.set_int('cursor-size', target); }
-        catch (e) { log('magnixify: set cursor-size: ' + e.message); }
+        try {
+            s.set_int('cursor-size', target);
+        } catch (e) {
+            log('magnixify: set cursor-size: ' + e.message);
+            return;
+        }
+        this._cursorLastApplied = target;
+        if (!this._cursorWasOverridden && target !== this._cursorSavedSize) {
+            this._cursorWasOverridden = true;
+            this._savePrefs();
+        }
     }
-    
+
     _rememberCursorSize() {
         if (this._cursorSavedSize) return;
-        const s = this._cursorSettingsInstance();
-        if (!s) return;
-        try { this._cursorSavedSize = s.get_int('cursor-size'); }
-        catch (_) { this._cursorSavedSize = this._cursorSizeBase; }
+        this._cursorSavedSize = this._cursorBaseline || this._cursorSizeBase;
     }
-    
+
     _restoreCursorSize() {
         if (!this._cursorSavedSize) return;
         const s = this._cursorSettingsInstance();
-        if (!s) return;
-        try { s.set_int('cursor-size', this._cursorSavedSize); }
-        catch (e) { log('magnixify: restore cursor-size: ' + e.message); }
+        if (s) {
+            try {
+                s.set_int('cursor-size', this._cursorSavedSize);
+            } catch (e) {
+                log('magnixify: restore cursor-size: ' + e.message);
+            }
+        }
         this._cursorSavedSize = 0;
+        this._cursorLastApplied = 0;
+        if (this._cursorWasOverridden) {
+            this._cursorWasOverridden = false;
+            this._savePrefs();
+        }
     }
 
     _initAtspi() {
         if (!Atspi) return;
+
+        let accessible = false;
+        try {
+            const s = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+            accessible = s.get_boolean('toolkit-accessibility');
+        } catch (e) {
+            log('magnixify: cannot read toolkit-accessibility: ' + e.message);
+            return;
+        }
+        if (!accessible) {
+            log('magnixify: focus tracking disabled (toolkit-accessibility is off)');
+            return;
+        }
+
         try { Atspi.init(); } catch (_) { }
         try {
             this._atspiListener = Atspi.EventListener.new(e => this._onAtspiEvent(e));
@@ -360,6 +449,7 @@ class MagnixifyIndicator extends PanelMenu.Button {
     }
 
     _setFocusPoint(x, y) {
+        if (!this._mon) return;
         if (x < this._mon.x || x >= this._mon.x + this._mon.w ||
             y < this._mon.y || y >= this._mon.y + this._mon.h)
             return;
@@ -508,13 +598,9 @@ class MagnixifyIndicator extends PanelMenu.Button {
         const shouldPeek = modDown || overviewWantsPeek;
 
         if (shouldPeek !== this._peeking) {
-            log(`magnixify: peek ${shouldPeek ? 'ON' : 'OFF'} — ` +
-                `super=${this._superHeld} alt=${this._altHeld} ` +
-                `overview=${Main.overview.visible} ` +
-                `modal=${modalActive} recentModal=${recentModal} ` +
-                `peekOnOverview=${this._peekOnOverview}`);
             this._peeking = shouldPeek;
             this._applyCursorSize(shouldPeek ? ZOOM_MIN : this._zoomLevel);
+            this._applyBrightness();
             this._zoomActor.remove_all_transitions();
             this._zoomActor.ease({
                 scale_x: shouldPeek ? 1.0 : this._zoomLevel,
@@ -534,6 +620,7 @@ class MagnixifyIndicator extends PanelMenu.Button {
     }
 
     _setZoomLevel(v) {
+        if (!Number.isFinite(v)) return;
         v = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v));
         this._zoomLevel = v;
 
@@ -551,7 +638,33 @@ class MagnixifyIndicator extends PanelMenu.Button {
         if (this._state === 'ZOOMED')
             this._applyCursorSize(this._peeking ? ZOOM_MIN : v);
     }
-    
+
+    _applyBrightness() {
+        if (!this._brightnessEffect) return;
+        const b = this._peeking ? 0.0 : this._brightnessLevel;
+        try {
+            this._brightnessEffect.set_brightness_full(b, b, b);
+        } catch (e) {
+            log('magnixify: set brightness: ' + e.message);
+        }
+    }
+
+    _setBrightnessLevel(v) {
+        v = Math.max(BRIGHTNESS_MIN, Math.min(BRIGHTNESS_MAX, v));
+        this._brightnessLevel = v;
+        this._applyBrightness();
+
+        if (this._brightnessRow) {
+            const norm = (v - BRIGHTNESS_MIN) / (BRIGHTNESS_MAX - BRIGHTNESS_MIN);
+            this._syncingBrightnessSlider = true;
+            this._brightnessRow.slider.value = clamp01(norm);
+            this._syncingBrightnessSlider = false;
+            const pct = Math.round(v * 100);
+            const sign = pct > 0 ? '+' : '';
+            this._brightnessRow.val.set_text(`${sign}${pct}%`);
+        }
+    }
+
     _startCaretPolling() {
         if (this._caretPollTimer || !this._activeTextObject) return;
         this._caretPollTimer = GLib.timeout_add(
@@ -607,18 +720,24 @@ class MagnixifyIndicator extends PanelMenu.Button {
         }
     }
 
-    ZoomIn()       { this._setZoomLevel(this._zoomLevel + ZOOM_STEP); }
-    ZoomOut()      { this._setZoomLevel(this._zoomLevel - ZOOM_STEP); }
-    Toggle()       { this._toggle(); }
-    SetZoom(level) { this._setZoomLevel(Number(level)); }
-    GetZoom()      { return this._zoomLevel; }
+    ZoomIn()            { this._setZoomLevel(this._zoomLevel + ZOOM_STEP); }
+    ZoomOut()           { this._setZoomLevel(this._zoomLevel - ZOOM_STEP); }
+    Toggle()            { this._toggle(); }
+    SetZoom(level)      { this._setZoomLevel(Number(level)); }
+    GetZoom()           { return this._zoomLevel; }
+    SetBrightness(level) {
+        this._setBrightnessLevel(Number(level));
+        this._savePrefs();
+    }
+    GetBrightness()     { return this._brightnessLevel; }
 
     _buildPopup() {
         const popupWidth = Math.round(400 * 0.55);
 
         const root = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
         const content = new St.BoxLayout({
-            vertical: true, x_expand: true,
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
             style: `min-width: ${popupWidth}px; max-width: ${popupWidth}px; `
                  + 'spacing: 8px; padding: 6px;',
         });
@@ -634,6 +753,9 @@ class MagnixifyIndicator extends PanelMenu.Button {
 
         this._zoomRow = this._buildZoomSliderRow();
         content.add_child(this._zoomRow.container);
+
+        this._brightnessRow = this._buildBrightnessSliderRow();
+        content.add_child(this._brightnessRow.container);
 
         this._mouseRow = this._buildToggleRow({
             label: 'follow mouse',
@@ -694,7 +816,8 @@ class MagnixifyIndicator extends PanelMenu.Button {
 
     _buildZoomSliderRow() {
         const container = new St.BoxLayout({
-            vertical: true, x_expand: true, style: 'spacing: 4px;',
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true, style: 'spacing: 4px;',
         });
         const headerRow = new St.BoxLayout({ x_expand: true, style: 'spacing: 6px;' });
         headerRow.add_child(plainLabel('zoom',
@@ -718,6 +841,45 @@ class MagnixifyIndicator extends PanelMenu.Button {
             const v = ZOOM_MIN + slider.value * (ZOOM_MAX - ZOOM_MIN);
             val.set_text(`x${v.toFixed(1)}`);
             this._setZoomLevel(v);
+        });
+
+        container.add_child(row);
+        return { container, slider, val };
+    }
+
+    _buildBrightnessSliderRow() {
+        const container = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true, style: 'spacing: 4px;',
+        });
+        const headerRow = new St.BoxLayout({ x_expand: true, style: 'spacing: 6px;' });
+        headerRow.add_child(plainLabel('brightness',
+            'font-weight: bold; font-size: 0.95em; opacity: 0.9;'));
+        headerRow.add_child(new St.Widget({ x_expand: true }));
+        container.add_child(headerRow);
+
+        const row = new St.BoxLayout({ x_expand: true, style: 'spacing: 8px;' });
+        const initial = (this._brightnessLevel - BRIGHTNESS_MIN) /
+                        (BRIGHTNESS_MAX - BRIGHTNESS_MIN);
+        const slider = new Slider.Slider(clamp01(initial));
+        slider.x_expand = true;
+        slider.y_align  = Clutter.ActorAlign.CENTER;
+        row.add_child(slider);
+
+        const pct0 = Math.round(this._brightnessLevel * 100);
+        const sign0 = pct0 > 0 ? '+' : '';
+        const val = plainLabel(`${sign0}${pct0}%`,
+            'width: 44px; text-align: right; font-size: 0.85em; opacity: 0.85;');
+        row.add_child(val);
+
+        slider.connect('notify::value', () => {
+            if (this._syncingBrightnessSlider) return;
+            const v = BRIGHTNESS_MIN + slider.value * (BRIGHTNESS_MAX - BRIGHTNESS_MIN);
+            const pct = Math.round(v * 100);
+            const sign = pct > 0 ? '+' : '';
+            val.set_text(`${sign}${pct}%`);
+            this._setBrightnessLevel(v);
+            this._savePrefs();
         });
 
         container.add_child(row);
@@ -817,9 +979,10 @@ class MagnixifyIndicator extends PanelMenu.Button {
             this._stopPeekWatch();
             if (this._zoomActor) this._zoomActor.remove_all_transitions();
             this._container.destroy();
-            this._container = null;
-            this._zoomActor = null;
-            this._clone     = null;
+            this._container      = null;
+            this._zoomActor      = null;
+            this._clone          = null;
+            this._brightnessEffect = null;
         }
 
         this._focusX = -1;
@@ -852,6 +1015,15 @@ class MagnixifyIndicator extends PanelMenu.Button {
         this._zoomActor.set_scale(1.0, 1.0);
         this._container.add_child(this._zoomActor);
 
+        try {
+            this._brightnessEffect = new Clutter.BrightnessContrastEffect();
+            this._zoomActor.add_effect(this._brightnessEffect);
+            this._applyBrightness();
+        } catch (e) {
+            log('magnixify: brightness effect unavailable: ' + e.message);
+            this._brightnessEffect = null;
+        }
+
         this._clone = new Clutter.Clone({
             source: Main.uiGroup,
             x: -mon.x, y: -mon.y,
@@ -862,6 +1034,7 @@ class MagnixifyIndicator extends PanelMenu.Button {
         global.stage.add_child(this._container);
 
         this._rememberCursorSize();
+        this._applyCursorSize(this._zoomLevel);
         this._setState('ZOOMING_IN');
         this._zoomActor.ease({
             scale_x: this._zoomLevel,
@@ -885,6 +1058,7 @@ class MagnixifyIndicator extends PanelMenu.Button {
         this._stopCaretPolling();
         this._stopPeekWatch();
         this._peeking = false;
+        this._restoreCursorSize();
         this._setState('ZOOMING_OUT');
         const container = this._container;
         const zoomActor = this._zoomActor;
@@ -904,14 +1078,20 @@ class MagnixifyIndicator extends PanelMenu.Button {
         this._stopFollow();
         this._stopCaretPolling();
         this._stopPeekWatch();
-        if (this._zoomActor) this._zoomActor.remove_all_transitions();
+        if (this._zoomActor) {
+            this._zoomActor.remove_all_transitions();
+            if (this._brightnessEffect) {
+                try { this._zoomActor.remove_effect(this._brightnessEffect); } catch (_) {}
+            }
+        }
         if (this._container) this._container.destroy();
-        this._container = null;
-        this._zoomActor = null;
-        this._clone     = null;
-        this._mon       = null;
-        this._peeking   = false;
-        this._lastModalTime = 0;
+        this._container        = null;
+        this._zoomActor        = null;
+        this._clone            = null;
+        this._brightnessEffect = null;
+        this._mon              = null;
+        this._peeking          = false;
+        this._lastModalTime    = 0;
         this._setState('IDLE');
     }
 
@@ -922,6 +1102,7 @@ class MagnixifyIndicator extends PanelMenu.Button {
         if (s === 'ZOOMED') {
             this._startPeekWatch();
             this._applyCursorSize(this._peeking ? ZOOM_MIN : this._zoomLevel);
+            this._applyBrightness();
         } else if (s === 'IDLE' || s === 'ZOOMING_OUT') {
             this._stopPeekWatch();
         }
@@ -995,23 +1176,23 @@ class MagnixifyIndicator extends PanelMenu.Button {
         this._stopPeekWatch();
 
         if (this._focusWindowSignalId) {
-            global.display.disconnect(this._focusWindowSignalId);
+            try { global.display.disconnect(this._focusWindowSignalId); } catch (_) {}
             this._focusWindowSignalId = 0;
         }
         if (this._stageFocusSignalId) {
-            global.stage.disconnect(this._stageFocusSignalId);
+            try { global.stage.disconnect(this._stageFocusSignalId); } catch (_) {}
             this._stageFocusSignalId = 0;
         }
         if (this._capturedEventId) {
-            global.stage.disconnect(this._capturedEventId);
+            try { global.stage.disconnect(this._capturedEventId); } catch (_) {}
             this._capturedEventId = 0;
         }
         if (this._overviewShowingId) {
-            Main.overview.disconnect(this._overviewShowingId);
+            try { Main.overview.disconnect(this._overviewShowingId); } catch (_) {}
             this._overviewShowingId = 0;
         }
         if (this._overviewHiddenId) {
-            Main.overview.disconnect(this._overviewHiddenId);
+            try { Main.overview.disconnect(this._overviewHiddenId); } catch (_) {}
             this._overviewHiddenId = 0;
         }
 
@@ -1020,7 +1201,7 @@ class MagnixifyIndicator extends PanelMenu.Button {
             this._dbus = null;
         }
         if (this._dbusNameId) {
-            Gio.bus_unown_name(this._dbusNameId);
+            try { Gio.bus_unown_name(this._dbusNameId); } catch (_) {}
             this._dbusNameId = 0;
         }
 
@@ -1031,7 +1212,9 @@ class MagnixifyIndicator extends PanelMenu.Button {
             } catch (_) {}
             this._atspiListener = null;
         }
+
         this._teardown();
+        this._cursorSettings = null;
     }
 });
 
@@ -1064,8 +1247,8 @@ export default class MagnixifyExtension extends Extension {
     }
 
     disable() {
-        this._indicator?.cleanup();
-        this._indicator?.destroy();
+        try { this._indicator?.cleanup?.(); } catch (e) { logError(e, 'magnixify: cleanup failed'); }
+        try { this._indicator?.destroy(); } catch (_) {}
         this._indicator = null;
     }
 
@@ -1080,6 +1263,7 @@ export default class MagnixifyExtension extends Extension {
         );
         item.reactive = false;
         btn.menu.addMenuItem(item);
+        btn.cleanup = () => {};
         return btn;
     }
 }
